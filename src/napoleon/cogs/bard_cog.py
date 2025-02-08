@@ -4,13 +4,13 @@ from discord.ext import commands, tasks
 import json
 import re
 
-from napol import Napol
-from napol_utils.youtube_dl import play_song, clear_music_folder, get_video_name
+from napoleon import Napoleon
+from napoleon_utils.youtube_dl import play_song, clear_music_folder, get_video_name
 from emanations.config import get_authorized_channel
 
 
 class BardDiscord(commands.Cog, ):
-    def __init__(self, bot:Napol):
+    def __init__(self, bot:Napoleon):
         self.bot = bot
         self.db = self.bot.db
         self.http_session = self.bot.http_session

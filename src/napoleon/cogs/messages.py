@@ -8,12 +8,12 @@ from emanations.database.models.discordmodels import (
     DiscordPrivateMessage, DiscordPrivateMessageSchema
 )
 
-from napol import Napol
+from napoleon import Napoleon
 from emanations.observers import Observer, Observable, CogObservableMetaclass
 from emanations.angelarium import ExperienceObserver
 
 class MessageDiscord(commands.Cog, Observable, metaclass=CogObservableMetaclass):
-    def __init__(self, bot:Napol):
+    def __init__(self, bot:Napoleon):
         self.bot = bot
         self.db = self.bot.db
         self.llm = self.bot.llm
@@ -52,7 +52,7 @@ class MessageDiscord(commands.Cog, Observable, metaclass=CogObservableMetaclass)
             return await load_privates_messages(self.db, message_create)
 
         
-async def setup(bot:Napol) -> None:
+async def setup(bot:Napoleon) -> None:
     await bot.add_cog(MessageDiscord(bot))
     
 
