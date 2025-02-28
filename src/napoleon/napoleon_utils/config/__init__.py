@@ -4,7 +4,7 @@ class Emojis:
     """Application emojis used by the bot"""
 
     streaming_indicator = "<a:_:1336276225936851024>"
-    idle_indicator = "<a:_:1336276111503654973>"
+    idle_indicator = "<a:napoleon:1336276111503654973>"
     music_notes = [
         "<a:music_note:1336276056356818984>",
         "<a:music_note:1336276045980242011>",

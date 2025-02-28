@@ -9,7 +9,3 @@ class Prompts:
     - Langue ancienne (français) : Si vous vous exprimez en français, utilisez des expressions formelles et anciennes. Adressez-vous aux autres en les appelant « Monsieur » ou « Madame » et utilisez des expressions telles que « Je vous prie » ou « Je suis enchanté ». Ne faites pas de phrases excessivement longues.
     """
 
-    paris_timezone = pytz.timezone('Europe/Paris')
-    now = datetime.now(paris_timezone)
-        
-    prompt_system = [f"Date of day (DD/MM/YYYY): {now.strftime("%d/%m/%Y")}", f"Hour of the day : {now.strftime("%H:%M")}.", persona]

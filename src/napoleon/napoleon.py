@@ -29,10 +29,9 @@ logger.addHandler(handler)
 from emanations import DiscordBot
 
 from emanations.database import AsyncDb
-from emanations.api.llm import OpenAIServerModel
+from emanations.api.llm import OpenAIServerModel, AngelariumAgent
 from emanations.api.diffusion.stability import StabilityAI
 from emanations.api.tts.elevenlabs import ElevenLabs
-from emanations.api.llm.tools import get_weather
 
 from napoleon_utils.config import Emojis, Prompts
 
@@ -58,14 +57,17 @@ class Napoleon(DiscordBot):
     def bot_description(self):
         return "Napol-On est un musicien d'une grande distinction, chargé de l'honneur de jouer de la musique classique avec une régularité et une assiduité qui ne connaissent point de relâche."
 
-    @property
-    def prompts(self) -> "Prompts":
-        return Prompts
-
     
 async def main():
     db = AsyncDb(os.getenv("DB_URI"))
-    llm = OpenAIServerModel(model_id="llama-3.3-70b-versatile", api_base="https://api.groq.com/openai/v1", api_key=os.getenv("GROQ_KEY"))
+    llm = OpenAIServerModel(
+        model_id="llama-3.3-70b-versatile", api_base="https://api.groq.com/openai/v1", api_key=os.getenv("GROQ_KEY")
+    )
+    
+    agent = AngelariumAgent(
+        llm=llm,
+        prompts=Prompts
+    )
     stability = StabilityAI(os.getenv("STABILITY_KEY"))
     elevenlabs = ElevenLabs(os.getenv("ELEVENLABS_KEY"))
 
@@ -76,7 +78,7 @@ async def main():
             db = db,
             cogs_path="cogs",
             llm = llm,
-            tools=[get_weather],
+            agent=agent,
             stability = stability,
             elevenlabs = elevenlabs,
             http_session = http_session,

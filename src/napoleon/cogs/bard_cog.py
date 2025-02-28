@@ -50,7 +50,7 @@ class BardDiscord(commands.Cog, ):
         
 
     async def get_voice_channel(self, guild:discord.Guild):
-        authorized_channels = get_authorized_channel(guild.id, "napol-on")
+        authorized_channels = get_authorized_channel(guild.id, "napoléon")
         if authorized_channels:
             channel = self.bot.get_channel(authorized_channels[0])
             if channel.type == discord.ChannelType.voice:
