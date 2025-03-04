@@ -66,7 +66,8 @@ async def main():
     
     agent = AngelariumAgent(
         llm=llm,
-        prompts=Prompts
+        prompts=Prompts,
+        db=db,
     )
     stability = StabilityAI(os.getenv("STABILITY_KEY"))
     elevenlabs = ElevenLabs(os.getenv("ELEVENLABS_KEY"))
