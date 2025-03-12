@@ -29,7 +29,7 @@ logger.addHandler(handler)
 from emanations import DiscordBot
 
 from emanations.database import AsyncDb
-from emanations.api.llm import OpenAIServerModel, AngelariumAgent
+from emanations.api.llm import OpenAIServerModel, OpenAiEmbeddingModel, AngelariumAgent
 from emanations.api.diffusion.stability import StabilityAI
 from emanations.api.tts.elevenlabs import ElevenLabs
 
@@ -63,9 +63,11 @@ async def main():
     llm = OpenAIServerModel(
         model_id="llama-3.3-70b-versatile", api_base="https://api.groq.com/openai/v1", api_key=os.getenv("GROQ_KEY")
     )
+    embedding_model = OpenAiEmbeddingModel(model_id="text-embedding-3-small", api_key=os.getenv("OPENAI_KEY"))
     
     agent = AngelariumAgent(
         llm=llm,
+        embedding_model=embedding_model,
         prompts=Prompts,
         db=db,
     )
