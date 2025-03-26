@@ -1,53 +1,38 @@
 import discord
 from discord.ext import commands, tasks
-
-import json
 import re
 
-from napoleon import Napoleon
-from napoleon_utils.youtube_dl import play_song, clear_music_folder, get_video_name
 from emanations.config import get_authorized_channel
+from napoleon_utils.youtube_dl import MusicPlayer
 
-
-class BardDiscord(commands.Cog, ):
-    def __init__(self, bot:Napoleon):
+class MusicCog(commands.Cog):
+    def __init__(self, bot):
         self.bot = bot
-        self.db = self.bot.db
-        self.http_session = self.bot.http_session
-        self.musicfy_key = self.bot.musicfy_key
+        self.player = self.bot.music_player
+        self.voice_clients = {}
 
-        self.bard_job.start()
-        self.check_members.start()
+        #Démarrage des tâches périodiques
+        self.music_loop.start()
+        self.check_idle.start()
 
-    def find_youtube_link(self, input_string):
-        # Regular expression pattern to match YouTube URLs
-        youtube_url_pattern = r'(https?://(?:www\.)?youtube\.com/watch\?v=[\w-]+|https?://youtu\.be/[\w-]+)'
+    def extract_youtube_url(self, text):
+        """Extrait une URL YouTube d'un texte"""
+        pattern = r'(https?://(?:www.)?(?:youtube.com/watch?v=|youtu.be/)[\w-]+)'
+        match = re.search(pattern, text)
+        return match.group(0) if match else None
 
-        # Search for the pattern in the input string
-        match = re.search(youtube_url_pattern, input_string)
+    def add_to_waitlist(self, url, title=None):
+        """Ajoute une URL à la file d'attente"""
+        playlist = self.player.load_playlist()
 
-        # If a match is found, return the matched string (YouTube link)
-        if match:
-            return match.group(0)
-        else:
-            return None
+        if not title:
+            title = self.player.get_video_info(url)
 
+        if len(title) > 100:
+            title = title[:97] + "..."
 
-    def add_to_waitlist(self, ctx:commands.Context, cleaned_message:str):
-        with open("data/playlist.json", "r") as f:
-            data = json.load(f)
-            if not ctx.message.embeds:
-                description = get_video_name(cleaned_message)
-            else:
-                description = ctx.message.embeds[0].title
-            
-            if len(description) > 100:
-                description = description[:100] + "..."
-            data['waitlist'].append({"url":cleaned_message, "title": description})
-                
-        with open("data/playlist.json", "w") as f:
-            json.dump(data, f, indent=4)      
-        
+        playlist['waitlist'].append({"url": url, "title": title})
+        self.player.save_playlist(playlist)
 
     async def get_voice_channel(self, guild:discord.Guild):
         authorized_channels = get_authorized_channel(guild.id, "napoléon")
@@ -56,166 +41,155 @@ class BardDiscord(commands.Cog, ):
             if channel.type == discord.ChannelType.voice:
                 return channel
 
-    
     @tasks.loop(seconds=5)
-    async def bard_job(self):
+    async def music_loop(self):
+        """Boucle principale pour gérer la musique"""
         for guild in self.bot.guilds:
             channel = await self.get_voice_channel(guild)
-            
-            if channel:
-                voice_state = guild.voice_client
-                if voice_state and voice_state.channel:
-                    if voice_state.channel.id != channel.id:
-                        await voice_state.move_to(channel)
-                        await play_song(self.bot, voice_state)
-                    else:
-                        return
-                else:
-                    voice_state = await channel.connect()
-                    await play_song(self.bot, voice_state)
+            if not channel:
+                continue
 
+            voice_client = guild.voice_client
+
+            #Connexion ou déplacement vers le canal approprié
+            if voice_client:
+                if voice_client.channel.id != channel.id:
+                    await voice_client.move_to(channel)
+                    self.voice_clients[guild.id] = voice_client
+                    await self.player.play_queue(voice_client, channel)
+            else:
+                try:
+                    voice_client = await channel.connect()
+                    self.voice_clients[guild.id] = voice_client
+                    await self.player.play_queue(voice_client, channel)
+                except Exception:
+                    continue
 
     @tasks.loop(seconds=10)
-    async def check_members(self):
+    async def check_idle(self):
+        """Vérifie si le bot est seul dans un canal vocal"""
         for guild in self.bot.guilds:
-            channel = await self.get_voice_channel(guild)
+            voice_client = guild.voice_client
+            if not voice_client or not voice_client.is_connected():
+                continue
 
-            if channel:
-                voice_state = guild.voice_client
-                if voice_state and voice_state.channel:
-                    if voice_state.channel.id == channel.id:
-                        if len(voice_state.channel.members) <= 1:
-                            self.bot.is_paused=True
-                            voice_state.pause()
-                    else:
-                        return
-    
+            if len(voice_client.channel.members) <= 1:
+                # Seul le bot est présent
+                if voice_client.is_playing() and not self.player.is_paused:
+                    self.player.is_paused = True
+                    voice_client.pause()
+            elif self.player.is_paused:
+                # Des membres sont présents, reprendre si en pause
+                self.player.is_paused = False
+                if voice_client.is_paused():
+                     voice_client.resume()
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
-        channel = await self.get_voice_channel(member.guild)
-        
-        if before.channel is None and after.channel:
-            if after.channel.id == channel.id:
-                self.bot.is_paused=False
-                
+        """Réagit aux changements d'état vocal des membres"""
+        if member.bot:
+            return
 
-    @bard_job.before_loop
-    async def before_bard_job(self):
-        clear_music_folder()
+        guild = member.guild
+        voice_client = guild.voice_client
+
+        if not voice_client:
+            return
+
+        #Quelqu'un rejoint le canal du bot
+        if after and after.channel and after.channel.id == voice_client.channel.id:
+            if self.player.is_paused:
+                self.player.is_paused = False
+                voice_client.resume()
+
+    @music_loop.before_loop
+    async def before_music_loop(self):
+        """Initialisation avant le démarrage de la boucle"""
+        # self.player.clear_music_folder()
         await self.bot.wait_until_ready()
 
-    @commands.command(
-        name="play",
-        description="Ajoute une musique à la playlist",
-    )
-    async def play(self, ctx:commands.Context) -> None:
+    @commands.command(name="play")
+    async def play_command(self, ctx):
+        """Commande pour ajouter une musique à la playlist"""
         channel = await self.get_voice_channel(ctx.guild)
-        cleaned_message = self.find_youtube_link(ctx.message.content)
-
-        if ctx.channel.id != channel.id :
+        if not channel or ctx.channel.id != channel.id:
             return
-        
-        if self.bot.is_paused:
-            self.bot.is_paused = False
+
+        if self.player.is_paused:
+            self.player.is_paused = False
+            if ctx.guild.voice_client and ctx.guild.voice_client.is_paused():
+                ctx.guild.voice_client.resume()
             await ctx.message.add_reaction("👍")
             return
-        
-        if cleaned_message:
-            self.add_to_waitlist(ctx, cleaned_message)
-            await ctx.message.add_reaction("👍")        
-        else:
-            voice_client = ctx.guild.voice_client
-            if not voice_client.is_playing():
-                await play_song(self.bot, voice_client, default_playlist=False)
 
-            
+        url = self.extract_youtube_url(ctx.message.content)
+        if url:
+            self.add_to_waitlist(url)
+            await ctx.message.add_reaction("👍")
+        elif ctx.guild.voice_client and not ctx.guild.voice_client.is_playing():
+            await self.player.play_queue(ctx.guild.voice_client, channel)
 
-    @commands.command(
-        name="next",
-        description="Joue la prochaine musique dans la playlist"
-    )
-    async def next(self, ctx:commands.Context, number:int = 1) -> None:
-        
+    @commands.command(name="next")
+    async def next_command(self, ctx, number: int = 1):
+        """Passe à la musique suivante"""
         channel = await self.get_voice_channel(ctx.guild)
-        if not channel: 
+        if not channel or ctx.channel.id != channel.id:
             return
-        
-        if ctx.channel.id != channel.id:
-            return
-        
-        voice_state :discord.VoiceClient = ctx.guild.voice_client
-        if voice_state and voice_state.channel:
-            if voice_state.channel.id != channel.id:
-                await voice_state.move_to(channel)
-        else:
-            voice_state = await channel.connect()
-        await ctx.message.add_reaction("👍")        
-        await play_song(self.bot, voice_state, default_playlist=False, break_=True, from_position=number)
-        
-        
-            
-        
-    @commands.command(
-        name="queue",
-        description="Ajoute une musique dans la playlist"
-    )
-    async def queue(self, ctx:commands.Context) -> None:
+
+        voice_client = ctx.guild.voice_client
+        if not voice_client:
+            voice_client = await channel.connect()
+        elif voice_client.channel.id != channel.id:
+            await voice_client.move_to(channel)
+
+        await ctx.message.add_reaction("👍")
+        await self.player.play_queue(voice_client, channel, interrupt=True, from_position=number)
+
+    @commands.command(name="queue")
+    async def queue_command(self, ctx):
+        """Affiche la file d'attente"""
         channel = await self.get_voice_channel(ctx.guild)
-        if ctx.channel.id != channel.id:
+        if not channel or ctx.channel.id != channel.id:
             return
-        return await self.gen_queue_embed(ctx)
-        
 
-    async def gen_queue_embed(self, ctx):
-        with open("data/playlist.json", "r") as f:
-            data = json.load(f)
-        
-        user_waitlist = data['waitlist']
-        default_waitlist = data['default_waitlist']
+        playlist = self.player.load_playlist()
+        user_waitlist = playlist['waitlist']
+        default_waitlist = playlist['default_waitlist']
 
-        waitlist = user_waitlist + default_waitlist
-        
-        if waitlist:
+        combined = user_waitlist + default_waitlist
+
+        if combined:
             embed = discord.Embed(
                 title="Playlist",
-                description=f"\n".join([f"- **{song['title']}**" for song in waitlist[:10]]),
+                description="\n".join([f"{i+1}. {song['title']}" for i, song in enumerate(combined[:10])]),
                 color=discord.Color.blue()
             )
+            if self.player.current_song:
+                embed.set_footer(text=f"En cours: {self.player.current_song}")
             await ctx.send(embed=embed)
         else:
             await ctx.send(f"La playlist est vide (la playlist par défaut est actuellement jouée par {self.bot.user.mention})")
-        
 
-    @commands.command(
-        name="pause",
-        description="Met en pause la musique en cours"
-    )
-    async def pause(self, ctx:commands.Context) -> None:
-        voice_state = ctx.guild.voice_client
-        self.bot.is_paused = True
-        if voice_state and voice_state.is_playing():
-            voice_state.pause()
-            await ctx.message.add_reaction("👍") 
+    @commands.command(name="pause")
+    async def pause_command(self, ctx):
+        """Met en pause la musique"""
+        voice_client = ctx.guild.voice_client
+        if voice_client and voice_client.is_playing():
+            self.player.is_paused = True
+            voice_client.pause()
+            await ctx.message.add_reaction("👍")
 
-    
-    @commands.command(
-        name="clear",
-        description="Vide la playlist"
-    )
-    async def clear_queue(self, ctx:commands.Context) -> None:
-        with open("data/playlist.json", "r") as f:
-            data = json.load(f)
-            data['waitlist'] = []
-            data['default_waitlist'] = []
-        
-        with open("data/playlist.json", "w") as f:
-            json.dump(data, f, indent=4)
+    @commands.command(name="clear")
+    async def clearcommand(self, ctx):
+        """Vide la file d'attente"""
+        playlist = self.player.load_playlist()
+        playlist['waitlist'] = []
+        playlist['default_waitlist'] = []
+        self.player.save_playlist(playlist)
         await ctx.message.add_reaction("👍")
 
-
-async def setup(bot:commands.Bot):
-    await bot.add_cog(BardDiscord(bot))
-
-
-    
+async def setup(bot):
+    # Initialiser le lecteur de musique
+    if not hasattr(bot, 'music_player'):
+        bot.music_player = MusicPlayer(bot)
+    await bot.add_cog(MusicCog(bot))
