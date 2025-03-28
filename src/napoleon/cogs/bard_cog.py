@@ -3,7 +3,9 @@ from discord.ext import commands, tasks
 import re
 
 from emanations.config import get_authorized_channel
+from emanations.utils import split_into_shorter_messages
 from napoleon_utils.youtube_dl import MusicPlayer
+from napoleon_utils.config import Prompts
 
 class MusicCog(commands.Cog):
     def __init__(self, bot):
@@ -83,6 +85,17 @@ class MusicCog(commands.Cog):
                 self.player.is_paused = False
                 if voice_client.is_paused():
                      voice_client.resume()
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild):
+        async with guild.system_channel.typing():
+            response = await self.bot.llm(
+                messages=[
+                    {"role" : "system", "content":Prompts.persona,},
+                    {"role":"user", "content":f"Tu viens de rejoindre le serveur {guild.name}. Fais tes salutations de manière brève et en restant en accord avec ton personnage. Message:"}]
+            )
+            for msg in split_into_shorter_messages(response.content):
+                await guild.system_channel.send(msg)        
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
